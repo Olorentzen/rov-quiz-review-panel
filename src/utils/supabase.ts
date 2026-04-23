@@ -11,8 +11,10 @@
 
 import { setAuthToken } from './api';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
+  || 'https://pupxceksdjbtbmbfhryw.supabase.co';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+  || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1cHhjZWtzZGpidGJtYmZocnl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU5MjA0NTcsImV4cCI6MjA5MTQ5NjQ1N30.O58b7MNjv0jeigKNZWWSbjtNbqQjoyn0oCOYvNkgmnM';
 
 export interface SupabaseAuthConfig {
   url: string;
