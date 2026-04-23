@@ -317,7 +317,7 @@ export default function ReviewPage() {
         rejectionReason: updated.reviewNotes || undefined,
         triageStatus,
         learningCategories: updated.learning_categories,
-        groupId: updated.groupId,
+        groupId: updated.groupId ?? undefined,
       });
     } catch (err: unknown) {
       // Revert on error

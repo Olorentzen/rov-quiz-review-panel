@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { listAllGroups, createGroup, updateGroup, deleteGroup, type GroupOption } from '../utils/api';
+import { listAllGroups, createGroup, updateGroup, deleteGroup } from '../utils/api';
 
 interface GroupRow {
   id: string;
