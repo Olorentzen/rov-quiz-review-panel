@@ -495,4 +495,8 @@ export async function checkHealth(): Promise<{ status: string; version: string }
   return request<{ status: string; version: string }>('/health');
 }
 
+export async function bootstrapProfile(): Promise<{ status: string; profile_id: string }> {
+  return request<{ status: string; profile_id: string }>('/auth/bootstrap', { method: 'POST' });
+}
+
 export const ALL_STEPS = ['parse', 'segment', 'extract', 'generate', 'review_prep'];

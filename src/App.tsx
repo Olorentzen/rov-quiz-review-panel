@@ -4,7 +4,7 @@ import RunsPage from './pages/RunsPage';
 import ReviewPage from './pages/ReviewPage';
 import PacksPage from './pages/PacksPage';
 import GroupsPage from './pages/GroupsPage';
-import { checkHealth, getAuthToken, clearAuthToken } from './utils/api';
+import { checkHealth, bootstrapProfile, getAuthToken, clearAuthToken } from './utils/api';
 import { signInWithPassword, signOut as supabaseSignOut, getSupabaseConfig } from './utils/supabase';
 import { canAccessUploads, canAccessRuns } from './utils/featureFlags';
 
@@ -42,6 +42,8 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     setLoading(true);
     try {
       await signInWithPassword(email, password);
+      // Bootstrap profile on first login — safe to call every time (INSERT OR IGNORE)
+      await bootstrapProfile();
       onLoggedIn();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
