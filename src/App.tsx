@@ -5,7 +5,7 @@ import ReviewPage from './pages/ReviewPage';
 import PacksPage from './pages/PacksPage';
 import GroupsPage from './pages/GroupsPage';
 import { checkHealth, clearAuthToken } from './utils/api';
-import { sendMagicLink, onAuthStateChange, signOut as supabaseSignOut, getMyProfile, bootstrapProfile } from './lib/supabase';
+import { sendMagicLink, onAuthStateChange, signOut as supabaseSignOut, getMyProfile, bootstrapProfile, getSession } from './lib/supabase';
 import { canAccessUploads, canAccessRuns } from './utils/featureFlags';
 
 type Tab = 'upload' | 'runs' | 'review' | 'packs' | 'groups';
@@ -121,23 +121,26 @@ export default function App() {
     else if (activeTab === 'runs' && !canAccessRuns) setActiveTab('review');
   }, []);
 
+  /**
+   * Restore session on mount — handles magic-link redirect where the session
+   * is in the URL hash. Runs before onAuthStateChange so we capture the session
+   * synchronously from getSession(), then bootstrap and check approval.
+   */
   useEffect(() => {
-    // Subscribe to auth state changes — fires immediately with current session
-    const { data: { subscription } } = onAuthStateChange(async (session) => {
+    async function restoreSession() {
+      const session = await getSession();
       if (!session) {
         setAppState('unauthenticated');
         setApiStatus('checking');
         return;
       }
 
-      // Bootstrap profile row if needed (idempotent — INSERT OR IGNORE on backend)
       try {
         await bootstrapProfile();
       } catch {
         // Non-fatal: profile row might already exist; continue to fetch it
       }
 
-      // Fetch profile and check approval status
       try {
         const profile = await getMyProfile();
         if (!profile) {
@@ -150,6 +153,21 @@ export default function App() {
       } catch {
         setAppState('unauthenticated');
       }
+    }
+
+    restoreSession();
+  }, []);
+
+  useEffect(() => {
+    // Listen for subsequent auth changes (logout, token refresh, etc.)
+    const { data: { subscription } } = onAuthStateChange(async (session) => {
+      if (!session) {
+        setAppState('unauthenticated');
+        setApiStatus('checking');
+        return;
+      }
+      // Session already restored and bootstrapped by restoreSession() above;
+      // onAuthStateChange here handles token refresh / logout only.
     });
 
     return () => subscription.unsubscribe();
