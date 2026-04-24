@@ -73,8 +73,8 @@ function syncApiToken(session: { access_token: string } | null) {
  * Returns an unsubscribe function.
  */
 export function onAuthStateChange(
-  callback: (session: { access_token: string; user: { id: string; email?: string } } | null) => void,
-) {
+  callback: (session: { access_token: string; user: { id: string; email?: string } } | null, event?: string) => void,
+): { data: { subscription: { unsubscribe: () => void } } } {
   return getClient().auth.onAuthStateChange((_event, session) => {
     syncApiToken(session);
     callback(session);

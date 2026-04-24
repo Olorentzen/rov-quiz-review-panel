@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import UploadPage from './pages/UploadPage';
 import RunsPage from './pages/RunsPage';
 import ReviewPage from './pages/ReviewPage';
@@ -114,6 +114,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('upload');
   const [, setSelectedJobId] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<'checking' | 'ok' | 'error'>('checking');
+  // Prevent double-processing when both getSession() and onAuthStateChange fire
+  const authHandledRef = useRef(false);
 
   // Redirect to 'review' if the current tab is inaccessible in hosted mode
   useEffect(() => {
@@ -122,55 +124,58 @@ export default function App() {
   }, []);
 
   /**
-   * Restore session on mount — handles magic-link redirect where the session
-   * is in the URL hash. Runs before onAuthStateChange so we capture the session
-   * synchronously from getSession(), then bootstrap and check approval.
+   * Handle a session that has been confirmed available.
+   * Called by both onAuthStateChange (magic-link redirect) and getSession() fallback.
    */
-  useEffect(() => {
-    async function restoreSession() {
-      const session = await getSession();
-      if (!session) {
-        setAppState('unauthenticated');
-        setApiStatus('checking');
-        return;
-      }
+  async function handleSession(session: { access_token: string; user: { id: string } } | null) {
+    if (authHandledRef.current) return;
+    authHandledRef.current = true;
 
-      try {
-        await bootstrapProfile();
-      } catch {
-        // Non-fatal: profile row might already exist; continue to fetch it
-      }
-
-      try {
-        const profile = await getMyProfile();
-        if (!profile) {
-          setAppState('awaiting_approval');
-        } else if (!profile.approved) {
-          setAppState('awaiting_approval');
-        } else {
-          setAppState('authenticated');
-        }
-      } catch {
-        setAppState('unauthenticated');
-      }
+    if (!session) {
+      setAppState('unauthenticated');
+      setApiStatus('checking');
+      return;
     }
 
-    restoreSession();
-  }, []);
+    try {
+      await bootstrapProfile();
+    } catch {
+      // Non-fatal: profile row might already exist; continue to fetch it
+    }
+
+    try {
+      const profile = await getMyProfile();
+      if (!profile) {
+        setAppState('awaiting_approval');
+      } else if (!profile.approved) {
+        setAppState('awaiting_approval');
+      } else {
+        setAppState('authenticated');
+      }
+    } catch {
+      setAppState('unauthenticated');
+    }
+  }
 
   useEffect(() => {
-    // Listen for subsequent auth changes (logout, token refresh, etc.)
+    // Primary session restorer: onAuthStateChange fires when Supabase finishes
+    // processing the URL hash after a magic-link redirect.
     const { data: { subscription } } = onAuthStateChange(async (session) => {
-      if (!session) {
-        setAppState('unauthenticated');
-        setApiStatus('checking');
-        return;
-      }
-      // Session already restored and bootstrapped by restoreSession() above;
-      // onAuthStateChange here handles token refresh / logout only.
+      await handleSession(session);
     });
 
     return () => subscription.unsubscribe();
+  }, []);
+
+  // Fallback: if onAuthStateChange hasn't fired within 2s (e.g. session already
+  // persisted in localStorage from a prior visit), try getSession() directly.
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (authHandledRef.current) return;
+      const session = await getSession();
+      await handleSession(session);
+    }, 2000);
+    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -181,6 +186,7 @@ export default function App() {
   }, [appState]);
 
   function handleSignOut() {
+    authHandledRef.current = false;
     supabaseSignOut();
     clearAuthToken();
     setAppState('unauthenticated');
