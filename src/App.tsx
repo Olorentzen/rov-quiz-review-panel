@@ -4,60 +4,64 @@ import RunsPage from './pages/RunsPage';
 import ReviewPage from './pages/ReviewPage';
 import PacksPage from './pages/PacksPage';
 import GroupsPage from './pages/GroupsPage';
-import { checkHealth, bootstrapProfile, getAuthToken, clearAuthToken } from './utils/api';
-import { signInWithPassword, signOut as supabaseSignOut, getSupabaseConfig } from './utils/supabase';
+import { checkHealth, clearAuthToken } from './utils/api';
+import { sendMagicLink, onAuthStateChange, signOut as supabaseSignOut, getMyProfile, bootstrapProfile } from './lib/supabase';
 import { canAccessUploads, canAccessRuns } from './utils/featureFlags';
 
 type Tab = 'upload' | 'runs' | 'review' | 'packs' | 'groups';
+type AppState = 'checking' | 'unauthenticated' | 'awaiting_approval' | 'authenticated';
 
 // ---------------------------------------------------------------------------
-// Login screen — shown when no Supabase JWT is stored
+// Login screen — magic link only
 // ---------------------------------------------------------------------------
 
-function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
+function LoginScreen() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
 
-  const config = getSupabaseConfig();
-
-  if (!config) {
-    return (
-      <div className="login-screen">
-        <div className="login-card">
-          <h1 className="login-title">PDF Ingestion Dashboard</h1>
-          <p className="login-error">
-            Supabase is not configured. Set <code>VITE_SUPABASE_URL</code> and{' '}
-            <code>VITE_SUPABASE_ANON_KEY</code> in your <code>.env</code> file, then restart the dev server.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  async function handleLogin(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      await signInWithPassword(email, password);
-      // Bootstrap profile on first login — safe to call every time (INSERT OR IGNORE)
-      await bootstrapProfile();
-      onLoggedIn();
+      const { error: authError } = await sendMagicLink(email);
+      if (authError) {
+        setError(authError);
+      } else {
+        setSent(true);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : 'Failed to send magic link');
     } finally {
       setLoading(false);
     }
+  }
+
+  if (sent) {
+    return (
+      <div className="login-screen">
+        <div className="login-card">
+          <h1 className="login-title">Check your email</h1>
+          <p className="login-subtitle">
+            A sign-in link has been sent to <strong>{email}</strong>.
+            Click the link in the email to sign in.
+          </p>
+          <button className="login-button" onClick={() => setSent(false)}>
+            Use a different email
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="login-screen">
       <div className="login-card">
         <h1 className="login-title">PDF Ingestion Dashboard</h1>
-        <p className="login-subtitle">Sign in with your Supabase account</p>
-        <form className="login-form" onSubmit={handleLogin}>
+        <p className="login-subtitle">Enter your email to receive a sign-in link</p>
+        <form className="login-form" onSubmit={handleSubmit}>
           <label className="login-label">
             Email
             <input
@@ -70,20 +74,9 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
               autoFocus
             />
           </label>
-          <label className="login-label">
-            Password
-            <input
-              type="password"
-              className="login-input"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </label>
           {error && <p className="login-error">{error}</p>}
           <button type="submit" className="login-button" disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? 'Sending...' : 'Send Sign-In Link'}
           </button>
         </form>
       </div>
@@ -92,50 +85,105 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Main app shell — requires auth
+// Awaiting approval screen
+// ---------------------------------------------------------------------------
+
+function AwaitingApprovalScreen({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <h1 className="login-title">Account pending approval</h1>
+        <p className="login-subtitle">
+          Your account has been created but is not yet approved.
+          Please contact an administrator to approve your account.
+        </p>
+        <button className="login-button" onClick={onSignOut}>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main app shell — requires auth + approval
 // ---------------------------------------------------------------------------
 
 export default function App() {
+  const [appState, setAppState] = useState<AppState>('checking');
   const [activeTab, setActiveTab] = useState<Tab>('upload');
   const [, setSelectedJobId] = useState<string | null>(null);
+  const [apiStatus, setApiStatus] = useState<'checking' | 'ok' | 'error'>('checking');
 
   // Redirect to 'review' if the current tab is inaccessible in hosted mode
   useEffect(() => {
     if (activeTab === 'upload' && !canAccessUploads) setActiveTab('review');
     else if (activeTab === 'runs' && !canAccessRuns) setActiveTab('review');
   }, []);
-  const [apiStatus, setApiStatus] = useState<'checking' | 'ok' | 'error' | 'unauthorized'>('checking');
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!getAuthToken());
 
   useEffect(() => {
-    checkHealth()
-      .then(() => setApiStatus('ok'))
-      .catch((err) => {
-        // Distinguish 401 (auth guard) from network error
-        if (err instanceof Error && err.message.includes('401')) {
-          setApiStatus('unauthorized');
+    // Subscribe to auth state changes — fires immediately with current session
+    const { data: { subscription } } = onAuthStateChange(async (session) => {
+      if (!session) {
+        setAppState('unauthenticated');
+        setApiStatus('checking');
+        return;
+      }
+
+      // Bootstrap profile row if needed (idempotent — INSERT OR IGNORE on backend)
+      try {
+        await bootstrapProfile();
+      } catch {
+        // Non-fatal: profile row might already exist; continue to fetch it
+      }
+
+      // Fetch profile and check approval status
+      try {
+        const profile = await getMyProfile();
+        if (!profile) {
+          setAppState('awaiting_approval');
+        } else if (!profile.approved) {
+          setAppState('awaiting_approval');
         } else {
-          setApiStatus('error');
+          setAppState('authenticated');
         }
-      });
+      } catch {
+        setAppState('unauthenticated');
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  function handleLogin() {
-    setIsAuthenticated(true);
-    setApiStatus('checking');
+  useEffect(() => {
+    if (appState !== 'authenticated') return;
     checkHealth()
       .then(() => setApiStatus('ok'))
       .catch(() => setApiStatus('error'));
-  }
+  }, [appState]);
 
   function handleSignOut() {
     supabaseSignOut();
     clearAuthToken();
-    setIsAuthenticated(false);
+    setAppState('unauthenticated');
   }
 
-  if (!isAuthenticated) {
-    return <LoginScreen onLoggedIn={handleLogin} />;
+  if (appState === 'checking') {
+    return (
+      <div className="login-screen">
+        <div className="login-card">
+          <p className="login-subtitle">Checking session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (appState === 'unauthenticated') {
+    return <LoginScreen />;
+  }
+
+  if (appState === 'awaiting_approval') {
+    return <AwaitingApprovalScreen onSignOut={handleSignOut} />;
   }
 
   return (
@@ -184,13 +232,12 @@ export default function App() {
         </nav>
 
         <div className="header-right">
-          <div className={`api-status api-status-${apiStatus === 'unauthorized' ? 'error' : apiStatus}`}>
+          <div className={`api-status api-status-${apiStatus}`}>
             <span className="api-dot" />
             <span className="api-label">
               {apiStatus === 'checking' && 'Checking API...'}
               {apiStatus === 'ok' && 'API Connected'}
               {apiStatus === 'error' && 'API Offline'}
-              {apiStatus === 'unauthorized' && 'Unauthorized — log in again'}
             </span>
           </div>
           <button className="sign-out-button" onClick={handleSignOut} title="Sign out">
