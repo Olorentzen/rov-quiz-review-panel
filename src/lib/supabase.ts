@@ -2,6 +2,7 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { setAuthToken } from '../utils/api';
+import { API_BASE } from '../utils/featureFlags';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
   || 'https://pupxceksdjbtbmbfhryw.supabase.co';
@@ -135,11 +136,11 @@ export async function bootstrapProfile(): Promise<void> {
 
   syncApiToken(session);
 
-  console.log('[supabase] bootstrapProfile: POST /api/auth/bootstrap', {
+  console.log('[supabase] bootstrapProfile: POST', `${API_BASE}/auth/bootstrap`, {
     hasToken: !!session.access_token,
   });
 
-  const response = await fetch('/api/auth/bootstrap', {
+  const response = await fetch(`${API_BASE}/auth/bootstrap`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${session.access_token}`,
