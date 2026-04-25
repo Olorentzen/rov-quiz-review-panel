@@ -19,7 +19,7 @@ import { canAccessUploads, canAccessRuns } from './utils/featureFlags';
 
 type Tab = 'upload' | 'runs' | 'review' | 'packs' | 'groups';
 type AppState = 'checking' | 'unauthenticated' | 'awaiting_approval' | 'authenticated' | 'profile_setup_failed';
-type AuthView = 'signin' | 'signup' | 'forgot_password' | 'reset_password' | 'update_password';
+type AuthView = 'signin' | 'signup' | 'forgot_password' | 'reset_password' | 'update_password' | 'signup_success';
 
 // ---------------------------------------------------------------------------
 // Password validation

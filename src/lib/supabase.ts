@@ -10,7 +10,7 @@
 //   VITE_SUPABASE_ANON_KEY=your-anon-key
 
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
-import { setAuthToken } from './api';
+import { setAuthToken } from '../utils/api';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
   || 'https://pupxceksdjbtbmbfhryw.supabase.co';
