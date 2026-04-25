@@ -1,8 +1,16 @@
-/// <reference types="vite/client" />
+// Supabase authentication utilities for the PDF Ingestion review panel.
+//
+// The panel uses the same Supabase project as the Flutter ROV Quiz app.
+// Users authenticate via email/password (Supabase auth).
+// The resulting JWT access token is stored in localStorage and used to
+// authenticate against the PDF Ingestion FastAPI.
+//
+// Configuration (set these in review panel's .env file):
+//   VITE_SUPABASE_URL=https://your-project.supabase.co
+//   VITE_SUPABASE_ANON_KEY=your-anon-key
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { setAuthToken } from '../utils/api';
-import { API_BASE } from '../utils/featureFlags';
+import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import { setAuthToken } from './api';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
   || 'https://pupxceksdjbtbmbfhryw.supabase.co';
@@ -24,18 +32,84 @@ function getClient(): SupabaseClient {
   return _client;
 }
 
+export interface SupabaseAuthConfig {
+  url: string;
+  anonKey: string;
+}
+
+export function getSupabaseConfig(): SupabaseAuthConfig | null {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    return null;
+  }
+  return { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY };
+}
+
 // ---------------------------------------------------------------------------
-// Magic link
+// Email/password authentication
 // ---------------------------------------------------------------------------
 
-/** Send a magic link to the given email */
-export async function sendMagicLink(email: string): Promise<{ error: string | null }> {
-  const { error } = await getClient().auth.signInWithOtp({
+export interface SignInError {
+  message: string;
+  status?: number;
+}
+
+export async function signInWithPassword(
+  email: string,
+  password: string
+): Promise<{ user: User; session: { access_token: string } }> {
+  const config = getSupabaseConfig();
+  if (!config) {
+    throw new Error(
+      'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file.'
+    );
+  }
+
+  const { data, error } = await getClient().auth.signInWithPassword({
     email,
-    options: {
-      emailRedirectTo: `${window.location.origin}/`,
-      shouldCreateUser: true,
-    },
+    password,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (data.session) {
+    setAuthToken(data.session.access_token);
+  }
+
+  return { user: data.user, session: data.session };
+}
+
+export async function signUp(
+  email: string,
+  password: string
+): Promise<{ user: User | null; session: { access_token: string } | null }> {
+  const config = getSupabaseConfig();
+  if (!config) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const { data, error } = await getClient().auth.signUp({
+    email,
+    password,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (data.session) {
+    setAuthToken(data.session.access_token);
+  }
+
+  return { user: data.user, session: data.session };
+}
+
+export async function resetPasswordForEmail(
+  email: string
+): Promise<{ error: string | null }> {
+  const { error } = await getClient().auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/update-password`,
   });
   return { error: error?.message ?? null };
 }
@@ -136,11 +210,13 @@ export async function bootstrapProfile(): Promise<void> {
 
   syncApiToken(session);
 
-  console.log('[supabase] bootstrapProfile: POST', `${API_BASE}/auth/bootstrap`, {
+  const API_BASE = import.meta.env.VITE_API_BASE as string || 'http://localhost:8000';
+
+  console.log('[supabase] bootstrapProfile: POST', `${API_BASE}/api/auth/bootstrap`, {
     hasToken: !!session.access_token,
   });
 
-  const response = await fetch(`${API_BASE}/auth/bootstrap`, {
+  const response = await fetch(`${API_BASE}/api/auth/bootstrap`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${session.access_token}`,
@@ -158,4 +234,15 @@ export async function bootstrapProfile(): Promise<void> {
 
   const text = await response.text().catch(() => '');
   console.log('[supabase] bootstrapProfile: success', text || response.status);
+}
+
+// ---------------------------------------------------------------------------
+// Password update (for recovery flow)
+// ---------------------------------------------------------------------------
+
+export async function updatePassword(newPassword: string): Promise<{ error: string | null }> {
+  const { error } = await getClient().auth.updateUser({
+    password: newPassword,
+  });
+  return { error: error?.message ?? null };
 }

@@ -5,17 +5,279 @@ import ReviewPage from './pages/ReviewPage';
 import PacksPage from './pages/PacksPage';
 import GroupsPage from './pages/GroupsPage';
 import { checkHealth, clearAuthToken } from './utils/api';
-import { sendMagicLink, onAuthStateChange, signOut as supabaseSignOut, getMyProfile, bootstrapProfile, getSession } from './lib/supabase';
+import {
+  signInWithPassword,
+  signUp,
+  onAuthStateChange,
+  signOut as supabaseSignOut,
+  getMyProfile,
+  bootstrapProfile,
+  getSession,
+  updatePassword,
+} from './lib/supabase';
 import { canAccessUploads, canAccessRuns } from './utils/featureFlags';
 
 type Tab = 'upload' | 'runs' | 'review' | 'packs' | 'groups';
 type AppState = 'checking' | 'unauthenticated' | 'awaiting_approval' | 'authenticated' | 'profile_setup_failed';
+type AuthView = 'signin' | 'signup' | 'forgot_password' | 'reset_password' | 'update_password';
 
 // ---------------------------------------------------------------------------
-// Login screen — magic link only
+// Password validation
 // ---------------------------------------------------------------------------
 
-function LoginScreen() {
+function validatePassword(password: string): string | null {
+  if (password.length < 8) {
+    return 'Password must be at least 8 characters';
+  }
+  if (!/[A-Z]/.test(password)) {
+    return 'Password must contain at least one uppercase letter';
+  }
+  if (!/[a-z]/.test(password)) {
+    return 'Password must contain at least one lowercase letter';
+  }
+  if (!/[0-9]/.test(password)) {
+    return 'Password must contain at least one number';
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Sign In screen
+// ---------------------------------------------------------------------------
+
+function SignInScreen({
+  onShowSignup,
+  onShowForgotPassword,
+}: {
+  onShowSignup: () => void;
+  onShowForgotPassword: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await signInWithPassword(email, password);
+      // Session will be handled by onAuthStateChange in App
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid email or password');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <h1 className="login-title">PDF Ingestion Dashboard</h1>
+        <p className="login-subtitle">Sign in with your email and password</p>
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label className="login-label">
+            Email
+            <input
+              type="email"
+              className="login-input"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              required
+              autoFocus
+            />
+          </label>
+          <label className="login-label">
+            Password
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="login-input"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                required
+                style={{ paddingRight: '2.5rem' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: '0.75rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#9ca3af',
+                  fontSize: '0.75rem',
+                }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
+          </label>
+          {error && <p className="login-error">{error}</p>}
+          <button type="submit" className="login-button" disabled={loading}>
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
+        <div className="login-footer">
+          <button className="login-link" onClick={onShowForgotPassword}>
+            Forgot password?
+          </button>
+          <span className="login-divider">|</span>
+          <button className="login-link" onClick={onShowSignup}>
+            Create account
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sign Up screen
+// ---------------------------------------------------------------------------
+
+function SignUpScreen({
+  onShowSignin,
+  onApprovalRequired,
+}: {
+  onShowSignin: () => void;
+  onApprovalRequired: (email: string) => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setError(passwordError);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await signUp(email, password);
+      if (result.user) {
+        onApprovalRequired(email);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Registration failed';
+      if (msg.includes('already registered') || msg.includes('already exists')) {
+        setError('Email already registered. Try signing in or use a different email.');
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <h1 className="login-title">Create Account</h1>
+        <p className="login-subtitle">Sign up to get started</p>
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label className="login-label">
+            Email
+            <input
+              type="email"
+              className="login-input"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              required
+              autoFocus
+            />
+          </label>
+          <label className="login-label">
+            Password
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="login-input"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                required
+                style={{ paddingRight: '2.5rem' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: '0.75rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#9ca3af',
+                  fontSize: '0.75rem',
+                }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <span style={{ fontSize: '0.7rem', color: '#9ca3af', display: 'block', marginTop: '0.25rem' }}>
+              Must contain: 8+ characters, uppercase, lowercase, and number
+            </span>
+          </label>
+          <label className="login-label">
+            Confirm Password
+            <input
+              type={showPassword ? 'text' : 'password'}
+              className="login-input"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              placeholder="Confirm your password"
+              required
+            />
+          </label>
+          {error && <p className="login-error">{error}</p>}
+          <button type="submit" className="login-button" disabled={loading}>
+            {loading ? 'Creating Account...' : 'Create Account'}
+          </button>
+        </form>
+        <div className="login-footer">
+          <button className="login-link" onClick={onShowSignin}>
+            Already have an account? Sign in
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Forgot Password screen
+// ---------------------------------------------------------------------------
+
+function ForgotPasswordScreen({
+  onShowSignin,
+}: {
+  onShowSignin: () => void;
+}) {
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -26,14 +288,15 @@ function LoginScreen() {
     setError(null);
     setLoading(true);
     try {
-      const { error: authError } = await sendMagicLink(email);
-      if (authError) {
-        setError(authError);
+      const { resetPasswordForEmail } = await import('./lib/supabase');
+      const { error: resetError } = await resetPasswordForEmail(email);
+      if (resetError) {
+        setError(resetError);
       } else {
         setSent(true);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send magic link');
+      setError(err instanceof Error ? err.message : 'Failed to send reset email');
     } finally {
       setLoading(false);
     }
@@ -43,13 +306,13 @@ function LoginScreen() {
     return (
       <div className="login-screen">
         <div className="login-card">
-          <h1 className="login-title">Check your email</h1>
+          <h1 className="login-title">Check Your Email</h1>
           <p className="login-subtitle">
-            A sign-in link has been sent to <strong>{email}</strong>.
-            Click the link in the email to sign in.
+            We sent a password reset link to <strong>{email}</strong>.
+            Click the link to reset your password.
           </p>
-          <button className="login-button" onClick={() => setSent(false)}>
-            Use a different email
+          <button className="login-button" onClick={onShowSignin}>
+            Back to Sign In
           </button>
         </div>
       </div>
@@ -59,8 +322,8 @@ function LoginScreen() {
   return (
     <div className="login-screen">
       <div className="login-card">
-        <h1 className="login-title">PDF Ingestion Dashboard</h1>
-        <p className="login-subtitle">Enter your email to receive a sign-in link</p>
+        <h1 className="login-title">Reset Password</h1>
+        <p className="login-subtitle">Enter your email to receive a reset link</p>
         <form className="login-form" onSubmit={handleSubmit}>
           <label className="login-label">
             Email
@@ -76,7 +339,160 @@ function LoginScreen() {
           </label>
           {error && <p className="login-error">{error}</p>}
           <button type="submit" className="login-button" disabled={loading}>
-            {loading ? 'Sending...' : 'Send Sign-In Link'}
+            {loading ? 'Sending...' : 'Send Reset Link'}
+          </button>
+        </form>
+        <div className="login-footer">
+          <button className="login-link" onClick={onShowSignin}>
+            Back to Sign In
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Registration success screen (shows after signup, before approval)
+// ---------------------------------------------------------------------------
+
+function RegistrationSuccessScreen({
+  email,
+  onSignin,
+}: {
+  email: string;
+  onSignin: () => void;
+}) {
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <h1 className="login-title">Check Your Email</h1>
+        <p className="login-subtitle">
+          We sent a confirmation link to <strong>{email}</strong>.
+          Click the link to activate your account and sign in.
+        </p>
+        <button className="login-button" onClick={onSignin}>
+          Return to Sign In
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Update Password screen (recovery flow)
+// ---------------------------------------------------------------------------
+
+function UpdatePasswordScreen({ onSuccess }: { onSuccess: () => void }) {
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setError(passwordError);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error: updateError } = await updatePassword(password);
+      if (updateError) {
+        setError(updateError);
+      } else {
+        setSuccess(true);
+        setTimeout(() => onSuccess(), 2000);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update password');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="login-screen">
+        <div className="login-card">
+          <h1 className="login-title">Password Updated</h1>
+          <p className="login-subtitle">
+            Your password has been successfully updated. You can now sign in with your new password.
+          </p>
+          <button className="login-button" onClick={onSuccess}>
+            Sign In
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <h1 className="login-title">Set New Password</h1>
+        <p className="login-subtitle">Enter your new password below</p>
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label className="login-label">
+            New Password
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="login-input"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Enter new password"
+                required
+                autoFocus
+                style={{ paddingRight: '2.5rem' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: '0.75rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#9ca3af',
+                  fontSize: '0.75rem',
+                }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <span style={{ fontSize: '0.7rem', color: '#9ca3af', display: 'block', marginTop: '0.25rem' }}>
+              Must contain: 8+ characters, uppercase, lowercase, and number
+            </span>
+          </label>
+          <label className="login-label">
+            Confirm New Password
+            <input
+              type={showPassword ? 'text' : 'password'}
+              className="login-input"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              placeholder="Confirm your new password"
+              required
+            />
+          </label>
+          {error && <p className="login-error">{error}</p>}
+          <button type="submit" className="login-button" disabled={loading}>
+            {loading ? 'Updating...' : 'Update Password'}
           </button>
         </form>
       </div>
@@ -139,8 +555,18 @@ export default function App() {
   const [, setSelectedJobId] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<'checking' | 'ok' | 'error'>('checking');
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [authView, setAuthView] = useState<AuthView>('signin');
+  const [pendingEmail, setPendingEmail] = useState<string>('');
   // Prevent double-processing when both getSession() and onAuthStateChange fire
   const authHandledRef = useRef(false);
+
+  // Check if we're on the update-password route
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path === '/update-password' || path.endsWith('/update-password')) {
+      setAuthView('update_password');
+    }
+  }, []);
 
   // Redirect to 'review' if the current tab is inaccessible in hosted mode
   useEffect(() => {
@@ -150,7 +576,7 @@ export default function App() {
 
   /**
    * Handle a session that has been confirmed available.
-   * Called by both onAuthStateChange (magic-link redirect) and getSession() fallback.
+   * Called by both onAuthStateChange (login) and getSession() fallback.
    */
   async function handleSession(session: { access_token: string; user: { id: string } } | null) {
     if (authHandledRef.current) return;
@@ -183,11 +609,9 @@ export default function App() {
 
       if (!profile) {
         if (bootstrapFailed) {
-          // Bootstrap failed AND no profile row — surface as error, not "awaiting approval"
           setProfileError(bootstrapErrMsg || 'Profile creation failed on the server.');
           setAppState('profile_setup_failed');
         } else {
-          // Bootstrap succeeded but still no row — rare; treat as setup failed
           setProfileError('Profile row not found after bootstrap. Please contact support.');
           setAppState('profile_setup_failed');
         }
@@ -204,8 +628,8 @@ export default function App() {
   }
 
   useEffect(() => {
-    // Primary session restorer: onAuthStateChange fires when Supabase finishes
-    // processing the URL hash after a magic-link redirect.
+    // Primary session restorer: onAuthStateChange fires when Supabase processes
+    // auth state changes.
     const { data: { subscription } } = onAuthStateChange(async (session) => {
       await handleSession(session);
     });
@@ -237,6 +661,12 @@ export default function App() {
     supabaseSignOut();
     clearAuthToken();
     setAppState('unauthenticated');
+    setAuthView('signin');
+  }
+
+  function handleApprovalRequired(email: string) {
+    setPendingEmail(email);
+    setAuthView('signup_success');
   }
 
   if (appState === 'checking') {
@@ -250,7 +680,38 @@ export default function App() {
   }
 
   if (appState === 'unauthenticated') {
-    return <LoginScreen />;
+    if (authView === 'update_password') {
+      return (
+        <UpdatePasswordScreen onSuccess={() => setAuthView('signin')} />
+      );
+    }
+    if (authView === 'signup') {
+      return (
+        <SignUpScreen
+          onShowSignin={() => setAuthView('signin')}
+          onApprovalRequired={handleApprovalRequired}
+        />
+      );
+    }
+    if (authView === 'forgot_password') {
+      return (
+        <ForgotPasswordScreen onShowSignin={() => setAuthView('signin')} />
+      );
+    }
+    if (authView === 'signup_success') {
+      return (
+        <RegistrationSuccessScreen
+          email={pendingEmail}
+          onSignin={() => setAuthView('signin')}
+        />
+      );
+    }
+    return (
+      <SignInScreen
+        onShowSignup={() => setAuthView('signup')}
+        onShowForgotPassword={() => setAuthView('forgot_password')}
+      />
+    );
   }
 
   if (appState === 'awaiting_approval') {
