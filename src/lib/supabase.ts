@@ -135,6 +135,10 @@ export async function bootstrapProfile(): Promise<void> {
 
   syncApiToken(session);
 
+  console.log('[supabase] bootstrapProfile: POST /api/auth/bootstrap', {
+    hasToken: !!session.access_token,
+  });
+
   const response = await fetch('/api/auth/bootstrap', {
     method: 'POST',
     headers: {
@@ -143,8 +147,14 @@ export async function bootstrapProfile(): Promise<void> {
     },
   });
 
+  console.log('[supabase] bootstrapProfile: response status', response.status);
+
   if (!response.ok) {
     const body = await response.text().catch(() => '');
+    console.error('[supabase] bootstrapProfile: failed', response.status, body);
     throw new Error(`Bootstrap failed: ${body || response.status}`);
   }
+
+  const text = await response.text().catch(() => '');
+  console.log('[supabase] bootstrapProfile: success', text || response.status);
 }

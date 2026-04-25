@@ -9,7 +9,7 @@ import { sendMagicLink, onAuthStateChange, signOut as supabaseSignOut, getMyProf
 import { canAccessUploads, canAccessRuns } from './utils/featureFlags';
 
 type Tab = 'upload' | 'runs' | 'review' | 'packs' | 'groups';
-type AppState = 'checking' | 'unauthenticated' | 'awaiting_approval' | 'authenticated';
+type AppState = 'checking' | 'unauthenticated' | 'awaiting_approval' | 'authenticated' | 'profile_setup_failed';
 
 // ---------------------------------------------------------------------------
 // Login screen — magic link only
@@ -106,6 +106,30 @@ function AwaitingApprovalScreen({ onSignOut }: { onSignOut: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
+// Profile setup failed screen
+// ---------------------------------------------------------------------------
+
+function ProfileSetupFailedScreen({ error, onSignOut }: { error: string; onSignOut: () => void }) {
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <h1 className="login-title">Profile setup failed</h1>
+        <p className="login-subtitle">
+          Account created, but profile setup failed. Please contact support with
+          the error below.
+        </p>
+        <pre style={{ fontSize: '0.75rem', color: '#cc0000', wordBreak: 'break-all', margin: '1rem 0' }}>
+          {error}
+        </pre>
+        <button className="login-button" onClick={onSignOut}>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main app shell — requires auth + approval
 // ---------------------------------------------------------------------------
 
@@ -114,6 +138,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('upload');
   const [, setSelectedJobId] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<'checking' | 'ok' | 'error'>('checking');
+  const [profileError, setProfileError] = useState<string | null>(null);
   // Prevent double-processing when both getSession() and onAuthStateChange fire
   const authHandledRef = useRef(false);
 
@@ -130,6 +155,7 @@ export default function App() {
   async function handleSession(session: { access_token: string; user: { id: string } } | null) {
     if (authHandledRef.current) return;
     authHandledRef.current = true;
+    setProfileError(null);
 
     if (!session) {
       setAppState('unauthenticated');
@@ -137,23 +163,43 @@ export default function App() {
       return;
     }
 
+    let bootstrapFailed = false;
+    let bootstrapErrMsg = '';
+
     try {
+      console.log('[auth] calling bootstrapProfile...');
       await bootstrapProfile();
-    } catch {
-      // Non-fatal: profile row might already exist; continue to fetch it
+      console.log('[auth] bootstrapProfile succeeded');
+    } catch (err) {
+      bootstrapFailed = true;
+      bootstrapErrMsg = err instanceof Error ? err.message : String(err);
+      console.error('[auth] bootstrapProfile failed:', bootstrapErrMsg);
     }
 
     try {
+      console.log('[auth] calling getMyProfile...');
       const profile = await getMyProfile();
+      console.log('[auth] getMyProfile result:', profile);
+
       if (!profile) {
-        setAppState('awaiting_approval');
+        if (bootstrapFailed) {
+          // Bootstrap failed AND no profile row — surface as error, not "awaiting approval"
+          setProfileError(bootstrapErrMsg || 'Profile creation failed on the server.');
+          setAppState('profile_setup_failed');
+        } else {
+          // Bootstrap succeeded but still no row — rare; treat as setup failed
+          setProfileError('Profile row not found after bootstrap. Please contact support.');
+          setAppState('profile_setup_failed');
+        }
       } else if (!profile.approved) {
         setAppState('awaiting_approval');
       } else {
         setAppState('authenticated');
       }
-    } catch {
-      setAppState('unauthenticated');
+    } catch (err) {
+      console.error('[auth] getMyProfile failed:', err);
+      setProfileError(String(err));
+      setAppState('profile_setup_failed');
     }
   }
 
@@ -187,6 +233,7 @@ export default function App() {
 
   function handleSignOut() {
     authHandledRef.current = false;
+    setProfileError(null);
     supabaseSignOut();
     clearAuthToken();
     setAppState('unauthenticated');
@@ -208,6 +255,10 @@ export default function App() {
 
   if (appState === 'awaiting_approval') {
     return <AwaitingApprovalScreen onSignOut={handleSignOut} />;
+  }
+
+  if (appState === 'profile_setup_failed') {
+    return <ProfileSetupFailedScreen error={profileError || 'Unknown error'} onSignOut={handleSignOut} />;
   }
 
   return (
