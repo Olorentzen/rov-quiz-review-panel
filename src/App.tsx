@@ -48,9 +48,11 @@ function validatePassword(password: string): string | null {
 function SignInScreen({
   onShowSignup,
   onShowForgotPassword,
+  onSuccess,
 }: {
   onShowSignup: () => void;
   onShowForgotPassword: () => void;
+  onSuccess: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -64,7 +66,7 @@ function SignInScreen({
     setLoading(true);
     try {
       await signInWithPassword(email, password);
-      // Session will be handled by onAuthStateChange in App
+      onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid email or password');
     } finally {
@@ -664,6 +666,11 @@ export default function App() {
     setAuthView('signin');
   }
 
+  function handleLoginSuccess() {
+    authHandledRef.current = false;
+    handleSession(null);
+  }
+
   function handleApprovalRequired(email: string) {
     setPendingEmail(email);
     setAuthView('signup_success');
@@ -710,6 +717,7 @@ export default function App() {
       <SignInScreen
         onShowSignup={() => setAuthView('signup')}
         onShowForgotPassword={() => setAuthView('forgot_password')}
+        onSuccess={handleLoginSuccess}
       />
     );
   }
