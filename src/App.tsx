@@ -666,9 +666,10 @@ export default function App() {
     setAuthView('signin');
   }
 
-  function handleLoginSuccess() {
+  async function handleLoginSuccess() {
     authHandledRef.current = false;
-    handleSession(null);
+    const session = await getSession();
+    handleSession(session);
   }
 
   function handleApprovalRequired(email: string) {
