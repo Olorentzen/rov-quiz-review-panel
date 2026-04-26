@@ -708,7 +708,7 @@ export default function App() {
   if (isUpdatePasswordRoute) {
     console.log('[auth] showing UpdatePasswordScreen (recovery flow)');
     return (
-      <UpdatePasswordScreen onSuccess={() => setAuthView('signin')} />
+      <UpdatePasswordScreen onSuccess={handleSignOut} />
     );
   }
 
@@ -725,7 +725,7 @@ export default function App() {
   if (appState === 'unauthenticated') {
     if (authView === 'update_password') {
       return (
-        <UpdatePasswordScreen onSuccess={() => setAuthView('signin')} />
+        <UpdatePasswordScreen onSuccess={handleSignOut} />
       );
     }
     if (authView === 'signup') {
