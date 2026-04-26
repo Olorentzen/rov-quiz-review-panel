@@ -581,11 +581,21 @@ export default function App() {
    * Called by both onAuthStateChange (login) and getSession() fallback.
    */
   async function handleSession(session: { access_token: string; user: { id: string } } | null) {
-    if (authHandledRef.current) return;
+    console.log('[auth handleSession]', {
+      sessionPresent: !!session,
+      sessionUserId: session?.user?.id,
+      pathname: window.location.pathname,
+    });
+
+    if (authHandledRef.current) {
+      console.log('[auth] handleSession skipped — already handled');
+      return;
+    }
     authHandledRef.current = true;
     setProfileError(null);
 
     if (!session) {
+      console.log('[auth] no session — redirecting to /login (appState: unauthenticated)');
       setAppState('unauthenticated');
       setApiStatus('checking');
       return;
@@ -632,7 +642,12 @@ export default function App() {
   useEffect(() => {
     // Primary session restorer: onAuthStateChange fires when Supabase processes
     // auth state changes.
-    const { data: { subscription } } = onAuthStateChange(async (session) => {
+    const { data: { subscription } } = onAuthStateChange(async (session, event) => {
+      console.log('[auth onAuthStateChange]', {
+        event,
+        sessionPresent: !!session,
+        pathname: window.location.pathname,
+      });
       await handleSession(session);
     });
 
@@ -675,6 +690,26 @@ export default function App() {
   function handleApprovalRequired(email: string) {
     setPendingEmail(email);
     setAuthView('signup_success');
+  }
+
+  // Detect password recovery: show UpdatePasswordScreen even when session is valid.
+  // Some Supabase setups emit SIGNED_IN during recovery, so we also check the pathname.
+  const isUpdatePasswordRoute =
+    window.location.pathname === '/update-password' ||
+    window.location.pathname.endsWith('/update-password');
+
+  console.log('[auth render]', {
+    pathname: window.location.pathname,
+    appState,
+    authView,
+    isUpdatePasswordRoute,
+  });
+
+  if (isUpdatePasswordRoute) {
+    console.log('[auth] showing UpdatePasswordScreen (recovery flow)');
+    return (
+      <UpdatePasswordScreen onSuccess={() => setAuthView('signin')} />
+    );
   }
 
   if (appState === 'checking') {
