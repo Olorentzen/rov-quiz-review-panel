@@ -371,7 +371,7 @@ function RegistrationSuccessScreen({
         <h1 className="login-title">Check Your Email</h1>
         <p className="login-subtitle">
           We sent a confirmation link to <strong>{email}</strong>.
-          Click the link to activate your account and sign in.
+          Click the link in the email to verify your address, then return here to sign in.
         </p>
         <button className="login-button" onClick={onSignin}>
           Return to Sign In
