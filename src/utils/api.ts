@@ -240,6 +240,15 @@ export async function listManuals(): Promise<Manual[]> {
   return request<Manual[]>('/manuals');
 }
 
+export interface ReviewManual {
+  id: string;
+  filename: string;
+}
+
+export async function listReviewManuals(): Promise<ReviewManual[]> {
+  return request<ReviewManual[]>('/review/manuals');
+}
+
 export async function deleteManual(manualId: string): Promise<void> {
   await request(`/manuals/${manualId}`, { method: 'DELETE' });
 }

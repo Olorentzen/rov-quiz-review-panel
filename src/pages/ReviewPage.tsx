@@ -5,11 +5,11 @@ import {
   updateQuestion,
   deleteQuestion,
   duplicateQuestion,
-  listManuals,
+  listReviewManuals,
   listCategories,
   listGroups,
   GROUP_OPTIONS,
-  type Manual,
+  type ReviewManual,
   type QuestionReviewItem,
   type QuestionReviewStatus,
   type TriageStatus as TriageStatusType,
@@ -109,7 +109,7 @@ function reviewItemToQuestion(item: QuestionReviewItem): Question {
 
 export default function ReviewPage() {
   const [questions, setQuestions] = useState<QuestionReviewItem[]>([]);
-  const [manuals, setManuals] = useState<Manual[]>([]);
+  const [manuals, setManuals] = useState<ReviewManual[]>([]);
   const [learningCategories, setLearningCategories] = useState<LearningCategory[]>([]);
   const [groups, setGroups] = useState<GroupOption[]>(GROUP_OPTIONS);
   const [selectedManualId, setSelectedManualId] = useState<string>('');
@@ -122,7 +122,7 @@ export default function ReviewPage() {
 
   const loadManuals = useCallback(async () => {
     try {
-      const list = await listManuals();
+      const list = await listReviewManuals();
       setManuals(list);
     } catch (e) { /* ignore */ }
   }, []);
