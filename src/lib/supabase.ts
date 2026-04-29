@@ -185,6 +185,41 @@ export async function getMyProfile(): Promise<Profile | null> {
   return data as Profile;
 }
 
+/** Role info returned by the FastAPI /api/auth/me endpoint. */
+export interface UserRoleInfo {
+  user_id: string;
+  email: string | null;
+  role: string;
+  approved: boolean;
+}
+
+/**
+ * Fetch the authenticated user's role from the FastAPI backend.
+ * The backend queries Supabase profiles as the authoritative source.
+ * Returns null if the request fails or the user is not authenticated.
+ */
+export async function fetchUserRole(): Promise<UserRoleInfo | null> {
+  const session = await getSession();
+  if (!session?.access_token) return null;
+
+  const API_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined
+    || 'https://web-production-7c9f9.up.railway.app/api';
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/me`, {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (res.status === 401 || res.status === 403) return null;
+    if (!res.ok) return null;
+    return await res.json() as UserRoleInfo;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sign out
 // ---------------------------------------------------------------------------

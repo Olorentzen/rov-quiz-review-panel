@@ -14,11 +14,13 @@ import {
   bootstrapProfile,
   getSession,
   updatePassword,
+  fetchUserRole,
+  type UserRoleInfo,
 } from './lib/supabase';
 import { canAccessUploads, canAccessRuns } from './utils/featureFlags';
 
 type Tab = 'upload' | 'runs' | 'review' | 'packs' | 'groups';
-type AppState = 'checking' | 'unauthenticated' | 'awaiting_approval' | 'authenticated' | 'profile_setup_failed';
+type AppState = 'checking' | 'unauthenticated' | 'awaiting_approval' | 'unauthorized' | 'authenticated' | 'profile_setup_failed';
 type AuthView = 'signin' | 'signup' | 'forgot_password' | 'reset_password' | 'update_password' | 'signup_success';
 
 // ---------------------------------------------------------------------------
@@ -548,6 +550,27 @@ function ProfileSetupFailedScreen({ error, onSignOut }: { error: string; onSignO
 }
 
 // ---------------------------------------------------------------------------
+// Unauthorized screen — signed in but lacks required role
+// ---------------------------------------------------------------------------
+
+function UnauthorizedScreen({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <h1 className="login-title">Access Restricted</h1>
+        <p className="login-subtitle">
+          Your account is active, but you do not have permission to access the review panel.
+          If you believe this is an error, contact an administrator.
+        </p>
+        <button className="login-button" onClick={onSignOut}>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main app shell — requires auth + approval
 // ---------------------------------------------------------------------------
 
@@ -559,6 +582,7 @@ export default function App() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [authView, setAuthView] = useState<AuthView>('signin');
   const [pendingEmail, setPendingEmail] = useState<string>('');
+  const [userRole, setUserRole] = useState<UserRoleInfo | null>(null);
   // Prevent double-processing when both getSession() and onAuthStateChange fire
   const authHandledRef = useRef(false);
 
@@ -630,7 +654,16 @@ export default function App() {
       } else if (!profile.approved) {
         setAppState('awaiting_approval');
       } else {
-        setAppState('authenticated');
+        // User is approved — verify role from FastAPI backend before granting access.
+        // fetchUserRole queries Supabase via the backend as the authoritative source.
+        const roleInfo = await fetchUserRole();
+        setUserRole(roleInfo);
+        const role = roleInfo?.role?.trim().toLowerCase();
+        if (role !== 'reviewer' && role !== 'admin') {
+          setAppState('unauthorized');
+        } else {
+          setAppState('authenticated');
+        }
       }
     } catch (err) {
       console.error('[auth] getMyProfile failed:', err);
@@ -675,6 +708,7 @@ export default function App() {
   function handleSignOut() {
     authHandledRef.current = false;
     setProfileError(null);
+    setUserRole(null);
     supabaseSignOut();
     clearAuthToken();
     setAppState('unauthenticated');
@@ -762,6 +796,10 @@ export default function App() {
     return <AwaitingApprovalScreen onSignOut={handleSignOut} />;
   }
 
+  if (appState === 'unauthorized') {
+    return <UnauthorizedScreen onSignOut={handleSignOut} />;
+  }
+
   if (appState === 'profile_setup_failed') {
     return <ProfileSetupFailedScreen error={profileError || 'Unknown error'} onSignOut={handleSignOut} />;
   }
@@ -812,6 +850,18 @@ export default function App() {
         </nav>
 
         <div className="header-right">
+          {userRole && (
+            <span style={{
+              fontSize: '11px',
+              padding: '2px 8px',
+              borderRadius: '10px',
+              background: userRole.role === 'admin' ? '#1e3a5f' : '#2c5282',
+              color: '#fff',
+              marginRight: '8px',
+            }}>
+              {userRole.role === 'admin' ? 'Admin' : 'Reviewer'}
+            </span>
+          )}
           <div className={`api-status api-status-${apiStatus}`}>
             <span className="api-dot" />
             <span className="api-label">
