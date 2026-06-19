@@ -104,6 +104,11 @@ function reviewItemToQuestion(item: QuestionReviewItem): Question {
     judgePrimaryIssue: item.judgePrimaryIssue ?? null,
     judgeResultJson: item.judgeResultJson ?? null,
     autoReviewedAt: item.autoReviewedAt ?? null,
+    // M3 self-eval — pass through with null fallback
+    selfVerdict: item.selfVerdict ?? null,
+    selfConfidence: item.selfConfidence ?? null,
+    selfReasons: item.selfReasons ?? [],
+    selfPrimaryIssue: item.selfPrimaryIssue ?? null,
   };
 }
 

@@ -194,6 +194,11 @@ export interface QuestionReviewItem {
   judgePrimaryIssue: string | null;
   judgeResultJson: Record<string, unknown> | null;
   autoReviewedAt: string | null;
+  // M3 self-eval (defensive — backend may not surface these yet)
+  selfVerdict?: 'pass' | 'borderline' | 'fail' | null;
+  selfConfidence?: number | null;
+  selfReasons?: string[];
+  selfPrimaryIssue?: 'wrong_answer' | 'ambiguous_stem' | 'poor_options' | 'source_mismatch' | 'duplicate' | 'generic_voice' | 'other' | null;
 }
 
 export interface PackBuildResponse {

@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import type { Question, LearningCategory, ReviewStatus } from '../types/pack';
-import { DIFFICULTY_OPTIONS, OPTION_LABELS } from '../types/pack';
+import {
+  DIFFICULTY_OPTIONS,
+  OPTION_LABELS,
+  MIN_RANK_OPTIONS,
+} from '../types/pack';
 import { GROUP_OPTIONS, type GroupOption } from '../utils/api';
 
 function getReviewStatus(q: Question): ReviewStatus {
@@ -130,6 +134,11 @@ export default function QuestionEditor({
     handleField('reviewStatus', newStatus);
   };
 
+  // AI metadata strip is shown only when M3 self-eval data exists.
+  // The backend may not surface these yet; the strip is defensive.
+  const hasSelfEval =
+    localQuestion.selfVerdict != null || localQuestion.selfConfidence != null;
+
   return (
     <div className="editor">
       <div className="editor-header">
@@ -164,31 +173,46 @@ export default function QuestionEditor({
         </div>
       </div>
 
-      {/* Judge metadata — subtle secondary info */}
-      {(localQuestion.judgeConfidence != null || localQuestion.judgePrimaryIssue || localQuestion.autoReviewedAt) && (
-        <div style={{
-          padding: '6px 12px',
-          background: 'var(--bg-tertiary)',
-          borderBottom: '1px solid var(--border)',
-          fontSize: '12px',
-          color: 'var(--text-secondary)',
-          display: 'flex',
-          gap: '16px',
-          flexWrap: 'wrap',
-        }}>
-          {localQuestion.judgeConfidence != null && (
-            <span>Judge confidence: <strong style={{ color: 'var(--text-primary)' }}>{Math.round(localQuestion.judgeConfidence * 100)}%</strong></span>
+      {/* AI metadata strip — replaces the old judge metadata strip.
+          Only shown when M3 self-eval fields are populated. */}
+      {hasSelfEval && (
+        <div
+          style={{
+            padding: '6px 12px',
+            background: 'var(--bg-tertiary)',
+            borderBottom: '1px solid var(--border)',
+            fontSize: '12px',
+            color: 'var(--text-secondary)',
+            display: 'flex',
+            gap: '16px',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+          }}
+        >
+          <span>
+            AI self-eval:{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>
+              {localQuestion.selfVerdict ?? 'unknown'}
+            </strong>
+            {localQuestion.selfConfidence != null && (
+              <> @ <strong style={{ color: 'var(--text-primary)' }}>{Math.round(localQuestion.selfConfidence * 100)}%</strong></>
+            )}
+          </span>
+          {localQuestion.selfPrimaryIssue && (
+            <span>
+              Issue: <code style={{ fontSize: '11px' }}>{localQuestion.selfPrimaryIssue}</code>
+            </span>
           )}
-          {localQuestion.judgePrimaryIssue && (
-            <span>Primary issue: <code style={{ fontSize: '11px' }}>{localQuestion.judgePrimaryIssue}</code></span>
-          )}
-          {localQuestion.reviewNotes && (
-            <span>Rejection reason: <code style={{ fontSize: '11px' }}>{localQuestion.reviewNotes}</code></span>
+          {localQuestion.selfReasons && localQuestion.selfReasons.length > 0 && (
+            <span>
+              Reasons:{' '}
+              <span style={{ color: 'var(--text-primary)' }}>{localQuestion.selfReasons.join('; ')}</span>
+            </span>
           )}
         </div>
       )}
 
-      {/* Rejection reason — shown only while actively filling out the reject form */}
+      {/* Rejection reason form — shown only while actively filling out the reject form */}
       {showRejectForm && (
         <div style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)' }}>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
@@ -272,6 +296,7 @@ export default function QuestionEditor({
       )}
 
       <div className="editor-form">
+        {/* Ring 1: always visible — the question content the reviewer decides on */}
         <div className="form-group">
           <label className="form-label">Stem</label>
           <textarea
@@ -333,32 +358,12 @@ export default function QuestionEditor({
           />
         </div>
 
-        <div className="form-group">
-          <label className="form-label">Group</label>
-          <select
-            className="form-select"
-            style={{
-              padding: '8px 12px',
-              background: 'var(--bg-tertiary)',
-              border: '1px solid var(--border)',
-              borderRadius: '4px',
-              color: 'var(--text-primary)',
-              fontSize: '14px',
-              width: '100%',
-            }}
-            value={localQuestion.groupId || ''}
-            onChange={e => handleField('groupId', e.target.value || null)}
-          >
-            <option value="">— none —</option>
-            {groups.map(g => (
-              <option key={g.id} value={g.id}>{g.label}</option>
-            ))}
-          </select>
-        </div>
+        {/* Ring 2: source & classification — collapsed by default */}
+        <details className="advanced-section" open>
+          <summary className="advanced-summary">Source &amp; classification</summary>
 
-        <div className="form-row">
           <div className="form-group">
-            <label className="form-label">Difficulty</label>
+            <label className="form-label">Group</label>
             <select
               className="form-select"
               style={{
@@ -370,119 +375,130 @@ export default function QuestionEditor({
                 fontSize: '14px',
                 width: '100%',
               }}
-              value={localQuestion.difficulty}
-              onChange={e => handleField('difficulty', e.target.value as Question['difficulty'])}
+              value={localQuestion.groupId || ''}
+              onChange={e => handleField('groupId', e.target.value || null)}
             >
-              {DIFFICULTY_OPTIONS.map(d => (
-                <option key={d} value={d}>{d}</option>
+              <option value="">— none —</option>
+              {groups.map(g => (
+                <option key={g.id} value={g.id}>{g.label}</option>
               ))}
             </select>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Min Rank</label>
-            <input
-              type="text"
-              className="form-input"
-              value={String(localQuestion.min_rank ?? '')}
-              onChange={e => handleField('min_rank', e.target.value)}
-              placeholder="e.g., pilot_1"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Confidence (0-1)</label>
-            <input
-              type="number"
-              className="form-input"
-              value={localQuestion.confidence}
-              onChange={e => handleField('confidence', parseFloat(e.target.value) || 0)}
-              min={0}
-              max={1}
-              step={0.1}
-            />
-          </div>
-        </div>
-
-        <div className="form-row">
-          <div className="form-group">
-            <label className="form-label">Subsystem Category</label>
-            <input
-              type="text"
-              className="form-input"
-              value={localQuestion.subsystem_category}
-              onChange={e => handleField('subsystem_category', e.target.value)}
-              placeholder="e.g., hydraulic, electrical"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Subsystem Label</label>
-            <input
-              type="text"
-              className="form-input"
-              value={localQuestion.subsystem_label}
-              onChange={e => handleField('subsystem_label', e.target.value)}
-              placeholder="e.g., Hydraulic Power Unit"
-            />
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Learning Categories</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-            {(localQuestion.learning_categories ?? []).map(catId => {
-              const cat = learningCategories.find(c => c.category_id === catId);
-              return (
-                <span key={catId} className="tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  {cat?.label || catId}
-                  <span className="tag-remove" onClick={() => handleRemoveCategory(catId)}>×</span>
-                </span>
-              );
-            })}
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <select
-              className="form-select"
-              style={{
-                padding: '6px 10px',
-                background: 'var(--bg-tertiary)',
-                border: '1px solid var(--border)',
-                borderRadius: '4px',
-                color: 'var(--text-primary)',
-                fontSize: '13px',
-                flex: 1,
-              }}
-              value=""
-              onChange={e => handleAddCategory(e.target.value)}
-            >
-              <option value="">Add category...</option>
-              {learningCategories
-                .filter(c => !(localQuestion.learning_categories ?? []).includes(c.category_id))
-                .map(c => (
-                  <option key={c.category_id} value={c.category_id}>{c.label}</option>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Difficulty</label>
+              <select
+                className="form-select"
+                style={{
+                  padding: '8px 12px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '4px',
+                  color: 'var(--text-primary)',
+                  fontSize: '14px',
+                  width: '100%',
+                }}
+                value={localQuestion.difficulty}
+                onChange={e => handleField('difficulty', e.target.value as Question['difficulty'])}
+              >
+                {DIFFICULTY_OPTIONS.map(d => (
+                  <option key={d} value={d}>{d}</option>
                 ))}
-            </select>
-            <input
-              type="text"
-              className="form-input"
-              value={newCategoryInput}
-              onChange={e => setNewCategoryInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleAddNewCategory();
-                }
-              }}
-              placeholder="New category name"
-              style={{ flex: 1 }}
-            />
-            <button className="btn btn-secondary" onClick={handleAddNewCategory} style={{ padding: '6px 12px' }}>
-              Add
-            </button>
-          </div>
-        </div>
+              </select>
+            </div>
 
+            <div className="form-group">
+              <label className="form-label">Min Rank</label>
+              <select
+                className="form-select"
+                style={{
+                  padding: '8px 12px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '4px',
+                  color: 'var(--text-primary)',
+                  fontSize: '14px',
+                  width: '100%',
+                }}
+                value={String(localQuestion.min_rank ?? 'pilot_1')}
+                onChange={e => handleField('min_rank', e.target.value)}
+              >
+                {MIN_RANK_OPTIONS.map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Learning Categories</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+              {(localQuestion.learning_categories ?? []).map(catId => {
+                const cat = learningCategories.find(c => c.category_id === catId);
+                return (
+                  <span key={catId} className="tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    {cat?.label || catId}
+                    <span className="tag-remove" onClick={() => handleRemoveCategory(catId)}>×</span>
+                  </span>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <select
+                className="form-select"
+                style={{
+                  padding: '6px 10px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '4px',
+                  color: 'var(--text-primary)',
+                  fontSize: '13px',
+                  flex: 1,
+                }}
+                value=""
+                onChange={e => handleAddCategory(e.target.value)}
+              >
+                <option value="">Add category...</option>
+                {learningCategories
+                  .filter(c => !(localQuestion.learning_categories ?? []).includes(c.category_id))
+                  .map(c => (
+                    <option key={c.category_id} value={c.category_id}>{c.label}</option>
+                  ))}
+              </select>
+              <input
+                type="text"
+                className="form-input"
+                value={newCategoryInput}
+                onChange={e => setNewCategoryInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddNewCategory();
+                  }
+                }}
+                placeholder="New category name"
+                style={{ flex: 1 }}
+              />
+              <button className="btn btn-secondary" onClick={handleAddNewCategory} style={{ padding: '6px 12px' }}>
+                Add
+              </button>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Source Quote</label>
+            <textarea
+              className="form-textarea"
+              value={localQuestion.source_quote || ''}
+              onChange={e => handleField('source_quote', e.target.value)}
+              placeholder="Quote from source document..."
+              rows={2}
+            />
+          </div>
+        </details>
+
+        {/* Ring 3: advanced — collapsed by default, for debugging and power users */}
         <details className="advanced-section">
           <summary className="advanced-summary">Advanced</summary>
 
@@ -512,17 +528,6 @@ export default function QuestionEditor({
                 }}
               />
             </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Source Quote</label>
-            <textarea
-              className="form-textarea"
-              value={localQuestion.source_quote || ''}
-              onChange={e => handleField('source_quote', e.target.value)}
-              placeholder="Quote from source document..."
-              rows={2}
-            />
           </div>
 
           <div className="source-traceability">

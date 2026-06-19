@@ -58,7 +58,33 @@ export interface Question {
   judgeResultJson?: Record<string, unknown> | null;
   autoReviewedAt?: string | null;
   rejectionReason?: string | null;
+  // M3 self-eval (defensive — backend may not surface these yet)
+  selfVerdict?: 'pass' | 'borderline' | 'fail' | null;
+  selfConfidence?: number | null;
+  selfReasons?: string[];
+  selfPrimaryIssue?: 'wrong_answer' | 'ambiguous_stem' | 'poor_options' | 'source_mismatch' | 'duplicate' | 'generic_voice' | 'other' | null;
 }
+
+export const MIN_RANK_OPTIONS = [
+  'pilot_2',
+  'pilot_1',
+  'senior_pilot',
+  'supervisor',
+  'superintendent',
+  'non_rov_personnel',
+  'all',
+] as const;
+
+export const SELF_VERDICT_OPTIONS = ['pass', 'borderline', 'fail'] as const;
+export const SELF_PRIMARY_ISSUE_OPTIONS = [
+  'wrong_answer',
+  'ambiguous_stem',
+  'poor_options',
+  'source_mismatch',
+  'duplicate',
+  'generic_voice',
+  'other',
+] as const;
 
 export interface Stage5Pack {
   schema_version?: string;
