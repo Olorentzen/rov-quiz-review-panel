@@ -1,5 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { listJobs, getJob, cancelJob, deleteJob, type JobListItem, type JobDetail } from '../utils/api';
+import {
+  listJobs,
+  getJob,
+  cancelJob,
+  deleteJob,
+  listManuals,
+  publishQuestions,
+  type JobListItem,
+  type JobDetail,
+  type Manual,
+  type PublishResult,
+} from '../utils/api';
 
 const STATUS_COLORS: Record<string, string> = {
   pending: '#6b7280',
@@ -26,6 +37,14 @@ export default function RunsPage(_props: { onSelectJob?: (jobId: string) => void
   const [loading, setLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Sync Review Questions state
+  const [manuals, setManuals] = useState<Manual[]>([]);
+  const [syncManualId, setSyncManualId] = useState<string>('');
+  const [syncDryRun, setSyncDryRun] = useState<boolean>(true);
+  const [syncing, setSyncing] = useState<boolean>(false);
+  const [syncResult, setSyncResult] = useState<PublishResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
   const loadJobs = useCallback(async () => {
     try {
       const list = await listJobs();
@@ -35,9 +54,38 @@ export default function RunsPage(_props: { onSelectJob?: (jobId: string) => void
     }
   }, []);
 
+  const loadManuals = useCallback(async () => {
+    try {
+      const list = await listManuals();
+      setManuals(list);
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  const handleSync = useCallback(async () => {
+    if (!syncManualId || syncing) return;
+    setSyncing(true);
+    setSyncError(null);
+    setSyncResult(null);
+    try {
+      const result = await publishQuestions({
+        manual_id: syncManualId,
+        all_manuals: false,
+        dry_run: syncDryRun,
+      });
+      setSyncResult(result);
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }, [syncManualId, syncDryRun, syncing]);
+
   // Smart polling: 5s when active jobs exist, 15s when idle
   useEffect(() => {
     loadJobs();
+    loadManuals();
     const schedule = () => {
       if (pollRef.current) clearInterval(pollRef.current);
       const hasActive = jobs.some(j => j.status === 'queued' || j.status === 'running');
@@ -198,6 +246,80 @@ export default function RunsPage(_props: { onSelectJob?: (jobId: string) => void
             ) : null}
           </div>
         )}
+      </div>
+
+      {/* Sync Review Questions to Supabase */}
+      <div className="sync-card">
+        <div className="sync-card-header">
+          <div className="section-title">Sync Review Questions to Supabase</div>
+          <div className="sync-card-sub">
+            Pushes local SQLite <code>review_questions</code> → Supabase Postgres so the online panel sees them.
+            Use after running &ldquo;5. Review Prep&rdquo; on the Upload page.
+          </div>
+        </div>
+
+        <div className="sync-card-body">
+          <div className="sync-row">
+            <label className="sync-label" htmlFor="sync-manual">Manual</label>
+            <select
+              id="sync-manual"
+              className="sync-select"
+              value={syncManualId}
+              onChange={e => setSyncManualId(e.target.value)}
+              disabled={syncing}
+            >
+              <option value="">— select a manual —</option>
+              {manuals.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.filename} ({m.id})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sync-row">
+            <label className="sync-checkbox">
+              <input
+                type="checkbox"
+                checked={syncDryRun}
+                onChange={e => setSyncDryRun(e.target.checked)}
+                disabled={syncing}
+              />
+              <span>Dry run — show counts without making changes</span>
+            </label>
+          </div>
+
+          <div className="sync-actions">
+            <button
+              className="btn btn-primary"
+              onClick={handleSync}
+              disabled={!syncManualId || syncing}
+            >
+              {syncing ? 'Syncing…' : 'Sync Review Questions'}
+            </button>
+            <span className="sync-hint">
+              Admin only — requires <code>role=admin</code> + <code>approved=true</code>.
+            </span>
+          </div>
+
+          {syncResult && (
+            <div className={`sync-result ${syncResult.errors > 0 ? 'sync-result-error' : 'sync-result-ok'}`}>
+              {syncResult.dry_run && <div className="sync-result-tag">DRY RUN — no changes made</div>}
+              <ul className="sync-result-stats">
+                <li><strong>New:</strong> {syncResult.new}</li>
+                <li><strong>Updated:</strong> {syncResult.updated}</li>
+                <li><strong>Skipped:</strong> {syncResult.skipped}</li>
+                <li><strong>Errors:</strong> {syncResult.errors}</li>
+              </ul>
+            </div>
+          )}
+
+          {syncError && (
+            <div className="sync-result sync-result-error">
+              <strong>Sync failed:</strong> {syncError}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

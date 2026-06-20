@@ -513,4 +513,33 @@ export async function bootstrapProfile(): Promise<{ status: string; profile_id: 
   return request<{ status: string; profile_id: string }>('/auth/bootstrap', { method: 'POST' });
 }
 
+// ---------------------------------------------------------------------------
+// Publish review questions (local SQLite → Supabase Postgres)
+// ---------------------------------------------------------------------------
+
+export interface PublishRequest {
+  manual_id?: string;
+  all_manuals?: boolean;
+  dry_run?: boolean;
+}
+
+export interface PublishResult {
+  status: string;
+  dry_run: boolean;
+  manual_id: string | null;
+  all_manuals: boolean;
+  new: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+}
+
+export async function publishQuestions(req: PublishRequest): Promise<PublishResult> {
+  return request<PublishResult>('/publish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+}
+
 export const ALL_STEPS = ['parse', 'segment', 'extract', 'generate', 'review_prep'];
