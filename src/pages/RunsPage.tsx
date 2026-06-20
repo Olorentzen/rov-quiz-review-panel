@@ -6,10 +6,12 @@ import {
   deleteJob,
   listManuals,
   publishQuestions,
+  deleteQuestionsBulk,
   type JobListItem,
   type JobDetail,
   type Manual,
   type PublishResult,
+  type BulkDeleteResult,
 } from '../utils/api';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -44,6 +46,13 @@ export default function RunsPage(_props: { onSelectJob?: (jobId: string) => void
   const [syncing, setSyncing] = useState<boolean>(false);
   const [syncResult, setSyncResult] = useState<PublishResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Bulk Delete state
+  const [deleteScope, setDeleteScope] = useState<'manual' | 'all'>('manual');
+  const [deleteManualId, setDeleteManualId] = useState<string>('');
+  const [deleting, setDeleting] = useState<boolean>(false);
+  const [deleteResult, setDeleteResult] = useState<BulkDeleteResult | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const loadJobs = useCallback(async () => {
     try {
@@ -81,6 +90,36 @@ export default function RunsPage(_props: { onSelectJob?: (jobId: string) => void
       setSyncing(false);
     }
   }, [syncManualId, syncDryRun, syncing]);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (deleting) return;
+    if (deleteScope === 'manual' && !deleteManualId) {
+      setDeleteError('Select a manual first.');
+      return;
+    }
+    const target = deleteScope === 'all' ? 'ALL manuals' : deleteManualId;
+    const ok = confirm(
+      `Delete review questions for ${target}?\n\n` +
+        'This is IRREVERSIBLE. The questions will be removed from local SQLite.\n' +
+        'They will reappear if you re-run review-prep from existing stage 4 output.',
+    );
+    if (!ok) return;
+    setDeleting(true);
+    setDeleteError(null);
+    setDeleteResult(null);
+    try {
+      const result = await deleteQuestionsBulk(
+        deleteScope === 'all'
+          ? { all: true }
+          : { manual_id: deleteManualId },
+      );
+      setDeleteResult(result);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteScope, deleteManualId, deleting]);
 
   // Smart polling: 5s when active jobs exist, 15s when idle
   useEffect(() => {
@@ -317,6 +356,95 @@ export default function RunsPage(_props: { onSelectJob?: (jobId: string) => void
           {syncError && (
             <div className="sync-result sync-result-error">
               <strong>Sync failed:</strong> {syncError}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bulk Delete Review Questions */}
+      <div className="sync-card" style={{ marginTop: '16px' }}>
+        <div className="sync-card-header">
+          <div className="section-title">Bulk Delete Review Questions</div>
+          <div className="sync-card-sub">
+            Removes questions from local SQLite <code>review_questions</code>.
+            Use to wipe a manual before re-running review-prep, or to start fresh.
+            <br />
+            <strong style={{ color: 'var(--danger)' }}>Irreversible.</strong>{' '}
+            Re-running review-prep on the same stage 4 output will recreate the questions.
+          </div>
+        </div>
+
+        <div className="sync-card-body">
+          <div className="sync-row">
+            <label className="sync-label">Scope</label>
+            <div className="sync-radio-group">
+              <label className="sync-checkbox">
+                <input
+                  type="radio"
+                  name="delete-scope"
+                  checked={deleteScope === 'manual'}
+                  onChange={() => setDeleteScope('manual')}
+                  disabled={deleting}
+                />
+                <span>One manual</span>
+              </label>
+              <label className="sync-checkbox">
+                <input
+                  type="radio"
+                  name="delete-scope"
+                  checked={deleteScope === 'all'}
+                  onChange={() => setDeleteScope('all')}
+                  disabled={deleting}
+                />
+                <span style={{ color: 'var(--danger)' }}>ALL manuals (wipe everything)</span>
+              </label>
+            </div>
+          </div>
+
+          {deleteScope === 'manual' && (
+            <div className="sync-row">
+              <label className="sync-label" htmlFor="delete-manual">Manual</label>
+              <select
+                id="delete-manual"
+                className="sync-select"
+                value={deleteManualId}
+                onChange={e => setDeleteManualId(e.target.value)}
+                disabled={deleting}
+              >
+                <option value="">— select a manual —</option>
+                {manuals.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.filename} ({m.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="sync-actions">
+            <button
+              className="btn btn-danger"
+              onClick={handleBulkDelete}
+              disabled={deleting || (deleteScope === 'manual' && !deleteManualId)}
+            >
+              {deleting ? 'Deleting…' : 'Delete Questions'}
+            </button>
+            <span className="sync-hint">
+              Admin only — requires <code>role=admin</code> + <code>approved=true</code>.
+              Local SQLite only; does not touch Supabase Postgres.
+            </span>
+          </div>
+
+          {deleteResult && (
+            <div className="sync-result sync-result-ok">
+              <strong>Deleted {deleteResult.deleted} question{deleteResult.deleted === 1 ? '' : 's'}</strong>
+              {' '}({deleteResult.all ? 'all manuals' : deleteResult.manual_id})
+            </div>
+          )}
+
+          {deleteError && (
+            <div className="sync-result sync-result-error">
+              <strong>Delete failed:</strong> {deleteError}
             </div>
           )}
         </div>

@@ -416,6 +416,34 @@ export async function deleteQuestion(qId: string): Promise<void> {
   await request(`/review/questions/${qId}`, { method: 'DELETE' });
 }
 
+// ---------------------------------------------------------------------------
+// Bulk delete review questions (admin-only, local SQLite only)
+// ---------------------------------------------------------------------------
+
+export interface BulkDeleteRequest {
+  manual_id?: string;
+  all?: boolean;
+}
+
+export interface BulkDeleteResult {
+  status: string;
+  deleted: number;
+  manual_id: string | null;
+  all: boolean;
+}
+
+export async function deleteQuestionsBulk(
+  req: BulkDeleteRequest,
+): Promise<BulkDeleteResult> {
+  const params = new URLSearchParams();
+  if (req.manual_id) params.set('manual_id', req.manual_id);
+  if (req.all) params.set('all', 'true');
+  const qs = params.toString();
+  return request<BulkDeleteResult>(`/review/questions/bulk${qs ? `?${qs}` : ''}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function duplicateQuestion(qId: string): Promise<QuestionReviewItem> {
   return request<QuestionReviewItem>(`/review/questions/${qId}/duplicate`, { method: 'POST' });
 }
