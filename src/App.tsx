@@ -4,6 +4,7 @@ import RunsPage from './pages/RunsPage';
 import ReviewPage from './pages/ReviewPage';
 import PacksPage from './pages/PacksPage';
 import GroupsPage from './pages/GroupsPage';
+import { ToastProvider } from './components/Toast';
 import { checkHealth, clearAuthToken } from './utils/api';
 import {
   signInWithPassword,
@@ -805,8 +806,9 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <header className="header">
+    <ToastProvider>
+      <div className="app">
+        <header className="header">
         <div className="header-brand">
           <span className="brand-title">PDF Ingestion</span>
           <span className="brand-subtitle">Quiz Review Dashboard</span>
@@ -887,6 +889,7 @@ export default function App() {
         {activeTab === 'packs' && <PacksPage />}
         {activeTab === 'groups' && <GroupsPage />}
       </main>
-    </div>
+      </div>
+    </ToastProvider>
   );
 }

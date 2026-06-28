@@ -20,6 +20,7 @@ import QuestionList from '../components/QuestionList';
 import QuestionEditor from '../components/QuestionEditor';
 import ValidationPanel from '../components/ValidationPanel';
 import NewQuestionModal from '../components/NewQuestionModal';
+import { useToast } from '../components/Toast';
 import { validatePack, computePackStats } from '../utils/validation';
 
 // Combined status dropdown option → API param mapping
@@ -124,6 +125,7 @@ export default function ReviewPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showNewQuestionModal, setShowNewQuestionModal] = useState(false);
+  const toast = useToast();
 
   const loadManuals = useCallback(async () => {
     try {
@@ -331,8 +333,12 @@ export default function ReviewPage() {
       if (err instanceof Error && err.message.includes('422')) {
         throw err;
       }
+      // Otherwise surface the failure — silent revert was the original bug.
+      toast.error(
+        `Save failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      );
     }
-  }, [questions]);
+  }, [questions, toast]);
 
   const handleBulkSetReviewStatus = useCallback(async (status: ReviewStatus) => {
     const triageStatus: TriageStatus =
@@ -340,49 +346,115 @@ export default function ReviewPage() {
       : status === 'rejected' ? 'rejected'
       : 'needs_review';
     const toUpdate = questions2.filter(q => selectedQuestionIds.has(q.question_id));
+    const succeeded: QuestionReviewItem[] = [];
+    const failed: Array<{ questionId: string; error: string }> = [];
     for (const q of toUpdate) {
       const reviewItem = questions.find(rq => rq.questionId === q.question_id);
       if (!reviewItem) continue;
       try {
-        await updateQuestion(reviewItem.id, { reviewStatus: status, triageStatus });
-      } catch (err) { /* ignore */ }
+        const updated = await updateQuestion(reviewItem.id, { reviewStatus: status, triageStatus });
+        succeeded.push(updated);
+      } catch (err) {
+        failed.push({
+          questionId: q.question_id,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
     }
-    loadQuestions();
+    // Apply server-confirmed updates directly — no refetch, no race window.
+    if (succeeded.length > 0) {
+      setQuestions(prev => {
+        const updatedById = new Map(succeeded.map(u => [u.questionId, u]));
+        return prev.map(q => updatedById.get(q.questionId) ?? q);
+      });
+    }
+    if (failed.length > 0) {
+      toast.error(
+        `Failed to update ${failed.length} of ${toUpdate.length} question${toUpdate.length === 1 ? '' : 's'}: ${failed[0].error}`,
+      );
+    } else if (succeeded.length > 0) {
+      toast.success(
+        `${succeeded.length} question${succeeded.length === 1 ? '' : 's'} marked ${status}`,
+      );
+    }
     setSelectedQuestionIds(new Set());
-  }, [questions2, selectedQuestionIds, questions, loadQuestions]);
+  }, [questions2, selectedQuestionIds, questions, toast]);
 
   const handleBulkReject = useCallback(async (reason: string) => {
     const toUpdate = questions2.filter(q => selectedQuestionIds.has(q.question_id));
+    const succeeded: QuestionReviewItem[] = [];
+    const failed: Array<{ questionId: string; error: string }> = [];
     for (const q of toUpdate) {
       const reviewItem = questions.find(rq => rq.questionId === q.question_id);
       if (!reviewItem) continue;
       try {
-        await updateQuestion(reviewItem.id, { reviewStatus: 'rejected', rejectionReason: reason, triageStatus: 'rejected' });
-      } catch (err) { /* ignore */ }
+        const updated = await updateQuestion(reviewItem.id, {
+          reviewStatus: 'rejected',
+          rejectionReason: reason,
+          triageStatus: 'rejected',
+        });
+        succeeded.push(updated);
+      } catch (err) {
+        failed.push({
+          questionId: q.question_id,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
     }
-    loadQuestions();
+    // Apply server-confirmed updates directly — no refetch.
+    if (succeeded.length > 0) {
+      setQuestions(prev => {
+        const updatedById = new Map(succeeded.map(u => [u.questionId, u]));
+        return prev.map(q => updatedById.get(q.questionId) ?? q);
+      });
+    }
+    if (failed.length > 0) {
+      toast.error(
+        `Failed to reject ${failed.length} of ${toUpdate.length} question${toUpdate.length === 1 ? '' : 's'}: ${failed[0].error}`,
+      );
+    } else if (succeeded.length > 0) {
+      toast.success(
+        `Rejected ${succeeded.length} question${succeeded.length === 1 ? 's' : ''} (${reason})`,
+      );
+    }
     setSelectedQuestionIds(new Set());
-  }, [questions2, selectedQuestionIds, questions, loadQuestions]);
+  }, [questions2, selectedQuestionIds, questions, toast]);
 
   const handleBulkDelete = useCallback(async () => {
     const toDelete = questions2.filter(q => selectedQuestionIds.has(q.question_id));
     if (!confirm(`Delete ${toDelete.length} question${toDelete.length === 1 ? '' : 's'}?`)) return;
-    const failed: string[] = [];
+    const failed: Array<{ questionId: string; error: string }> = [];
+    const deletedIds: string[] = [];
     for (const q of toDelete) {
       const reviewItem = questions.find(rq => rq.questionId === q.question_id);
       if (!reviewItem) continue;
       try {
         await deleteQuestion(reviewItem.id);
+        deletedIds.push(q.question_id);
       } catch (err) {
-        failed.push(q.stem.slice(0, 40) || q.question_id);
+        failed.push({
+          questionId: q.question_id,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
       }
     }
-    setSelectedQuestionIds(new Set());
-    loadQuestions();
-    if (failed.length > 0) {
-      alert(`Failed to delete ${failed.length} question${failed.length === 1 ? '' : 's'}:\n${failed.slice(0, 5).join('\n')}${failed.length > 5 ? '\n...' : ''}`);
+    // Remove deleted items from local state; refetch for any remaining rows.
+    if (deletedIds.length > 0) {
+      const deletedSet = new Set(deletedIds);
+      setQuestions(prev => prev.filter(q => !deletedSet.has(q.questionId)));
+      setSelectedQuestionIds(new Set());
+      if (failed.length > 0) {
+        toast.error(
+          `Deleted ${deletedIds.length} but failed to delete ${failed.length}: ${failed[0].error}`,
+        );
+      } else {
+        toast.success(`Deleted ${deletedIds.length} question${deletedIds.length === 1 ? '' : 's'}`);
+      }
+    } else if (failed.length > 0) {
+      toast.error(`Failed to delete ${failed.length} question${failed.length === 1 ? '' : 's'}: ${failed[0].error}`);
+      setSelectedQuestionIds(new Set());
     }
-  }, [questions2, selectedQuestionIds, questions, loadQuestions]);
+  }, [questions2, selectedQuestionIds, questions, toast]);
 
   const handleToggleSelect = useCallback((questionId: string) => {
     setSelectedQuestionIds(prev => {
